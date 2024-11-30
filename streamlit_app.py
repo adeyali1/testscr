@@ -34,7 +34,7 @@ st.markdown(
         height: auto;
     }
     </style>
-    <img class="logo" src="https://github.com/adeyali1/testscr/blob/main/Mawsool%20Website%20Logo%20%20(2).png" alt="Mawsool AI Logo">
+    <img class="logo" src="https://github.com/adeyali1/testscr/blob/main/Mawsool%20Website%20Logo%20%20(2).png?raw=true" alt="Mawsool AI Logo">
     """,
     unsafe_allow_html=True
 )
