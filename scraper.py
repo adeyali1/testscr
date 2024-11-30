@@ -70,7 +70,8 @@ def create_dynamic_listing_model(field_names: List[str]) -> Type[BaseModel]:
     """
     # Create field definitions using aliases for Field parameters
     field_definitions = {field: (str, ...) for field in field_names}
-    # Dynamically create the model with all field
+    field_definitions['source'] = (str, ...)  # Add source field
+    # Dynamically create the model with all fields
     return create_model('DynamicListingModel', **field_definitions)
 
 def create_listings_container_model(listing_model: Type[BaseModel]) -> Type[BaseModel]:
@@ -298,6 +299,10 @@ def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: 
 
         # Format data
         formatted_data, token_counts = format_data(markdown, DynamicListingsContainer, DynamicListingModel, selected_model)
+
+        # Add source URL to the results
+        for listing in formatted_data.listings:
+            listing.source = url  # Add source URL
 
         # Save formatted data
         save_formatted_data(formatted_data, output_folder, f'sorted_data_{file_number}.json', f'sorted_data_{file_number}.xlsx')
