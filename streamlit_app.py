@@ -178,6 +178,13 @@ if st.session_state['scraping_state'] == 'scraping':
                 # Update processed URLs count
                 st.session_state['processed_urls'] += 1
 
+                # Display real-time results for every 25 websites
+                if st.session_state['processed_urls'] % 25 == 0:
+                    st.write(f"Processed {st.session_state['processed_urls']} websites.")
+                    st.write(f"Current URL: {url}")
+                    st.write(f"Current Markdown: {markdown}")
+                    st.write(f"Current Formatted Data: {formatted_data}")
+
             except Exception as e:
                 st.error(f"Error processing URL {i}: {e}")
                 continue  # Continue processing the next URL
@@ -233,7 +240,7 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
         st.subheader("Download Extracted Data")
         col1, col2 = st.columns(2)
         with col1:
-            json_data = json.dumps(all_data, default=lambda o: [item.model_dump() for item in o.listings], indent=4)
+            json_data = json.dumps(all_data, default=lambda o: o.model_dump() if hasattr(o, 'model_dump') else str(o), indent=4)
             st.download_button(
                 "Download JSON",
                 data=json_data,
