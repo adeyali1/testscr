@@ -50,8 +50,6 @@ if 'urls' not in st.session_state:
     st.session_state['urls'] = []
 if 'processed_urls' not in st.session_state:
     st.session_state['processed_urls'] = 0
-if 'real_time_results' not in st.session_state:
-    st.session_state['real_time_results'] = []
 
 # Sidebar components
 st.sidebar.title("Web Scraper Settings")
@@ -115,7 +113,6 @@ if st.sidebar.button("LAUNCH SCRAPER", type="primary"):
         st.session_state['pagination_details'] = pagination_details
         st.session_state['scraping_state'] = 'scraping'
         st.session_state['processed_urls'] = 0
-        st.session_state['real_time_results'] = []
 
 # Scraping logic
 if st.session_state['scraping_state'] == 'scraping':
@@ -178,20 +175,8 @@ if st.session_state['scraping_state'] == 'scraping':
 
                     all_data.append(formatted_data)
 
-                    # Update real-time results
-                    st.session_state['real_time_results'].extend([listing.model_dump() for listing in formatted_data.listings])
-                    real_time_df = pd.DataFrame(st.session_state['real_time_results'])
-                    st.dataframe(real_time_df, use_container_width=True)
-
                 # Update processed URLs count
                 st.session_state['processed_urls'] += 1
-
-                # Display real-time results for every 25 websites
-                if st.session_state['processed_urls'] % 25 == 0:
-                    st.write(f"Processed {st.session_state['processed_urls']} websites.")
-                    st.write(f"Current URL: {url}")
-                    st.write(f"Current Markdown: {markdown}")
-                    st.write(f"Current Formatted Data: {formatted_data}")
 
             except Exception as e:
                 st.error(f"Error processing URL {i}: {e}")
