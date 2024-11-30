@@ -34,7 +34,7 @@ st.markdown(
         height: auto;
     }
     </style>
-    <img class="logo" src="https://mawsool.tech/wp-content/uploads/2023/09/logo-1.png" alt="Mawsool AI Logo">
+    <img class="logo" src="https://github.com/adeyali1/testscr/blob/main/Mawsool%20Website%20Logo%20%20(2).png" alt="Mawsool AI Logo">
     """,
     unsafe_allow_html=True
 )
@@ -171,12 +171,15 @@ if st.session_state['scraping_state'] == 'scraping':
 
                     # Add source URL to the results
                     for listing in formatted_data.listings:
-                        listing['source'] = url
+                        listing_dict = listing.model_dump()  # Convert to dictionary
+                        listing_dict['source'] = url  # Add source URL
+                        updated_listing = DynamicListingModel(**listing_dict)  # Create updated listing
+                        formatted_data.listings[formatted_data.listings.index(listing)] = updated_listing
 
                     all_data.append(formatted_data)
 
                     # Update real-time results
-                    st.session_state['real_time_results'].extend(formatted_data.listings)
+                    st.session_state['real_time_results'].extend([listing.model_dump() for listing in formatted_data.listings])
                     real_time_df = pd.DataFrame(st.session_state['real_time_results'])
                     st.dataframe(real_time_df, use_container_width=True)
 
@@ -201,7 +204,7 @@ if st.session_state['scraping_state'] == 'scraping':
         st.write(f"All raw data saved to {raw_data_path}")
 
         # Save all formatted data to a single file
-        combined_df = pd.DataFrame([item for sublist in all_data for item in sublist.listings])
+        combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
         formatted_data_path = os.path.join(output_folder, 'all_sorted_data.csv')
         combined_df.to_csv(formatted_data_path, index=False)
         st.write(f"All sorted data saved to {formatted_data_path}")
@@ -230,7 +233,7 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
     # Display scraping details
     if show_tags:
         st.subheader("Scraping Results")
-        combined_df = pd.DataFrame([item for sublist in all_data for item in sublist.listings])
+        combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
         st.dataframe(combined_df, use_container_width=True)
 
         # Display token usage and cost
@@ -245,14 +248,14 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
         st.subheader("Download Extracted Data")
         col1, col2 = st.columns(2)
         with col1:
-            json_data = json.dumps(all_data, default=lambda o: o.model_dump() if hasattr(o, 'model_dump') else str(o), indent=4)
+            json_data = json.dumps(all_data, default=lambda o: [item.model_dump() for item in o.listings], indent=4)
             st.download_button(
                 "Download JSON",
                 data=json_data,
                 file_name="scraped_data.json"
             )
         with col2:
-            combined_df = pd.DataFrame([item for sublist in all_data for item in sublist.listings])
+            combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
             st.download_button(
                 "Download CSV",
                 data=combined_df.to_csv(index=False),
