@@ -1,5 +1,3 @@
-# streamlit_app.py
-
 import streamlit as st
 from streamlit_tags import st_tags_sidebar
 import pandas as pd
@@ -24,8 +22,22 @@ from assets import PRICING
 import os
 
 # Initialize Streamlit app
-st.set_page_config(page_title="Universal Web Scraper", page_icon="🦑")
-st.title("Universal Web Scraper 🦑")
+st.set_page_config(page_title="Mawsool AI", page_icon="🦑", layout="wide")
+st.title("Mawsool AI 🦑")
+
+# Add the logo
+st.markdown(
+    """
+    <style>
+    .logo {
+        width: 100px;
+        height: auto;
+    }
+    </style>
+    <img class="logo" src="https://mawsool.tech/wp-content/uploads/2023/09/logo-1.png" alt="Mawsool AI Logo">
+    """,
+    unsafe_allow_html=True
+)
 
 # Initialize session state variables
 if 'scraping_state' not in st.session_state:
@@ -38,6 +50,8 @@ if 'urls' not in st.session_state:
     st.session_state['urls'] = []
 if 'processed_urls' not in st.session_state:
     st.session_state['processed_urls'] = 0
+if 'real_time_results' not in st.session_state:
+    st.session_state['real_time_results'] = []
 
 # Sidebar components
 st.sidebar.title("Web Scraper Settings")
@@ -101,6 +115,7 @@ if st.sidebar.button("LAUNCH SCRAPER", type="primary"):
         st.session_state['pagination_details'] = pagination_details
         st.session_state['scraping_state'] = 'scraping'
         st.session_state['processed_urls'] = 0
+        st.session_state['real_time_results'] = []
 
 # Scraping logic
 if st.session_state['scraping_state'] == 'scraping':
@@ -153,7 +168,17 @@ if st.session_state['scraping_state'] == 'scraping':
                     total_input_tokens += input_tokens
                     total_output_tokens += output_tokens
                     total_cost += cost
+
+                    # Add source URL to the results
+                    for listing in formatted_data.listings:
+                        listing['source'] = url
+
                     all_data.append(formatted_data)
+
+                    # Update real-time results
+                    st.session_state['real_time_results'].extend(formatted_data.listings)
+                    real_time_df = pd.DataFrame(st.session_state['real_time_results'])
+                    st.dataframe(real_time_df, use_container_width=True)
 
                 # Update processed URLs count
                 st.session_state['processed_urls'] += 1
