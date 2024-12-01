@@ -282,35 +282,17 @@ def calculate_price(token_counts, model):
 
 def generate_unique_folder_name(url):
     timestamp = datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
-    url_name = re.sub(r'\W+', '_', url.split('//')[1].split('/')[0])  # Extract domain name and replace non-alphanumeric characters
-    return f"{url_name}_{timestamp}"
 
-def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: str, file_number: int, markdown: str):
-    """Scrape a single URL and save the results."""
-    try:
-        # Save raw data
-        save_raw_data(markdown, output_folder, f'rawData_{file_number}.md')
+    # Parse the URL
+    parsed_url = urlparse(url)
 
-        # Create the dynamic listing model
-        DynamicListingModel = create_dynamic_listing_model(fields)
+    # Extract the domain name
+    domain = parsed_url.netloc or parsed_url.path.split('/')[0]
 
-        # Create the container model that holds a list of the dynamic listing models
-        DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
+    # Remove 'www.' if present
+    domain = re.sub(r'^www\.', '', domain)
 
-        # Format data
-        formatted_data, token_counts = format_data(markdown, DynamicListingsContainer, DynamicListingModel, selected_model)
+    # Remove any non-alphanumeric characters and replace with underscores
+    clean_domain = re.sub(r'\W+', '_', domain)
 
-        # Add source URL to the results
-        for listing in formatted_data.listings:
-            listing.source = url  # Add source URL
-
-        # Save formatted data
-        save_formatted_data(formatted_data, output_folder, f'sorted_data_{file_number}.json', f'sorted_data_{file_number}.xlsx')
-
-        # Calculate and return token usage and cost
-        input_tokens, output_tokens, total_cost = calculate_price(token_counts, selected_model)
-        return input_tokens, output_tokens, total_cost, formatted_data
-
-    except Exception as e:
-        print(f"An error occurred while processing {url}: {e}")
-        return 0, 0, 0, None
+    return f"{clean_domain}_{timestamp}"
