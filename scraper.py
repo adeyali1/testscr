@@ -1,342 +1,324 @@
-import streamlit as st
-from streamlit_tags import st_tags_sidebar
-import pandas as pd
+import os
+import random
+import time
+import re
 import json
 from datetime import datetime
-from scraper import (
-    fetch_html_api,
-    save_raw_data,
-    format_data,
-    save_formatted_data,
-    calculate_price,
-    html_to_markdown_with_readability,
-    create_dynamic_listing_model,
-    create_listings_container_model,
-    scrape_url,
-    generate_unique_folder_name
-)
-from pagination_detector import detect_pagination_elements
-import re
-from urllib.parse import urlparse
-from assets import PRICING
-import os
+from typing import List, Dict, Type
 
-# Initialize Streamlit app
-st.set_page_config(page_title="Mawsool AI", page_icon="🦑", layout="wide")
-st.title("Mawsool AI 🦑")
+import pandas as pd
+from bs4 import BeautifulSoup
+from pydantic import BaseModel, Field, create_model
+import html2text
+import tiktoken
+import streamlit as st
 
-# Add the logo
-st.markdown(
-    """
-    <style>
-    .logo {
-        width: 100px;
-        height: auto;
+from dotenv import load_dotenv
+import http.client
+
+from openai import OpenAI
+import google.generativeai as genai
+from groq import Groq
+
+from api_management import get_api_key
+from assets import USER_AGENTS, PRICING, HEADLESS_OPTIONS, SYSTEM_MESSAGE, USER_MESSAGE, LLAMA_MODEL_FULLNAME, GROQ_LLAMA_MODEL_FULLNAME, HEADLESS_OPTIONS_DOCKER
+load_dotenv()
+
+def fetch_html_api(url):
+    conn = http.client.HTTPSConnection("fast-ninja-scraper.p.rapidapi.com")
+    headers = {
+        'x-rapidapi-key': "779950d602mshdb324e7fb7fc384p10ad06jsnc96469ca8d95",
+        'x-rapidapi-host': "fast-ninja-scraper.p.rapidapi.com"
     }
-    </style>
-    <img class="logo" src="https://github.com/adeyali1/testscr/blob/main/Mawsool%20Website%20Logo%20%20(2).png?raw=true" alt="Mawsool AI Logo">
-    """,
-    unsafe_allow_html=True
-)
+    conn.request("GET", f"/scrape?url={url}", headers=headers)
+    res = conn.getresponse()
+    data = res.read()
+    return data.decode("utf-8")
 
-# Initialize session state variables
-if 'scraping_state' not in st.session_state:
-    st.session_state['scraping_state'] = 'idle'  # Possible states: 'idle', 'waiting', 'scraping', 'completed'
-if 'results' not in st.session_state:
-    st.session_state['results'] = None
-if 'driver' not in st.session_state:
-    st.session_state['driver'] = None
-if 'urls' not in st.session_state:
-    st.session_state['urls'] = []
-if 'processed_urls' not in st.session_state:
-    st.session_state['processed_urls'] = 0
+def clean_html(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
 
-# Sidebar components
-st.sidebar.title("Web Scraper Settings")
+    # Remove headers and footers based on common HTML tags or classes
+    for element in soup.find_all(['header', 'footer']):
+        element.decompose()  # Remove these tags and their content
 
-# API Keys
-with st.sidebar.expander("API Keys", expanded=False):
-    st.session_state['openai_api_key'] = st.text_input("OpenAI API Key", type="password")
-    st.session_state['gemini_api_key'] = st.text_input("Gemini API Key", type="password")
-    st.session_state['groq_api_key'] = st.text_input("Groq API Key", type="password")
+    return str(soup)
 
-# Model selection
-model_selection = st.sidebar.selectbox("Select Model", options=list(PRICING.keys()), index=0)
+def html_to_markdown_with_readability(html_content):
+    cleaned_html = clean_html(html_content)
 
-# File uploader for bulk URLs
-uploaded_file = st.sidebar.file_uploader("Upload CSV or TXT file with URLs", type=["csv", "txt"])
+    # Convert to markdown
+    markdown_converter = html2text.HTML2Text()
+    markdown_converter.ignore_links = False
+    markdown_content = markdown_converter.handle(cleaned_html)
 
-# Fields to extract
-show_tags = st.sidebar.toggle("Enable Scraping")
-fields = []
-if show_tags:
-    fields = st_tags_sidebar(
-        label='Enter Fields to Extract:',
-        text='Press enter to add a field',
-        value=[],
-        suggestions=[],
-        maxtags=-1,
-        key='fields_input'
-    )
+    return markdown_content
 
-st.sidebar.markdown("---")
+def save_raw_data(raw_data: str, output_folder: str, file_name: str):
+    """Save raw markdown data to the specified output folder."""
+    os.makedirs(output_folder, exist_ok=True)
+    raw_output_path = os.path.join(output_folder, file_name)
+    with open(raw_output_path, 'w', encoding='utf-8') as f:
+        f.write(raw_data)
+    print(f"Raw data saved to {raw_output_path}")
+    return raw_output_path
 
-# Conditionally display Pagination and Attended Mode options
-use_pagination = st.sidebar.toggle("Enable Pagination")
-pagination_details = ""
-if use_pagination:
-    pagination_details = st.sidebar.text_input(
-        "Enter Pagination Details (optional)",
-        help="Describe how to navigate through pages (e.g., 'Next' button class, URL pattern)"
-    )
+def save_raw_data_real_time(raw_data: str, output_folder: str, file_name: str):
+    """Save raw markdown data to the specified output folder in real-time."""
+    os.makedirs(output_folder, exist_ok=True)
+    raw_output_path = os.path.join(output_folder, file_name)
+    with open(raw_output_path, 'a', encoding='utf-8') as f:
+        f.write(raw_data + "\n\n")
+    print(f"Raw data saved to {raw_output_path}")
+    return raw_output_path
 
-st.sidebar.markdown("---")
+def create_dynamic_listing_model(field_names: List[str]) -> Type[BaseModel]:
+    """
+    Dynamically creates a Pydantic model based on provided fields.
+    field_name is a list of names of the fields to extract from the markdown.
+    """
+    # Create field definitions using aliases for Field parameters
+    field_definitions = {field: (str, ...) for field in field_names}
+    field_definitions['source'] = (str, ...)  # Add source field
+    # Dynamically create the model with all fields
+    return create_model('DynamicListingModel', **field_definitions)
 
-# Main action button
-if st.sidebar.button("LAUNCH SCRAPER", type="primary"):
-    if uploaded_file is None:
-        st.error("Please upload a file containing URLs.")
-    elif show_tags and len(fields) == 0:
-        st.error("Please enter at least one field to extract.")
-    else:
-        # Read URLs from the uploaded file
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-            st.session_state['urls'] = df.iloc[:, 0].tolist()
-        elif uploaded_file.name.endswith('.txt'):
-            st.session_state['urls'] = uploaded_file.getvalue().decode("utf-8").splitlines()
+def create_listings_container_model(listing_model: Type[BaseModel]) -> Type[BaseModel]:
+    """
+    Create a container model that holds a list of the given listing model.
+    """
+    return create_model('DynamicListingsContainer', listings=(List[listing_model], ...))
 
-        # Set up scraping parameters in session state
-        st.session_state['fields'] = fields
-        st.session_state['model_selection'] = model_selection
-        st.session_state['use_pagination'] = use_pagination
-        st.session_state['pagination_details'] = pagination_details
-        st.session_state['scraping_state'] = 'scraping'
-        st.session_state['processed_urls'] = 0
+def trim_to_token_limit(text, model, max_tokens=120000):
+    encoder = tiktoken.encoding_for_model(model)
+    tokens = encoder.encode(text)
+    if len(tokens) > max_tokens:
+        trimmed_text = encoder.decode(tokens[:max_tokens])
+        return trimmed_text
+    return text
 
-# Scraping logic
-if st.session_state['scraping_state'] == 'scraping':
-    with st.spinner('Scraping in progress...'):
-        # Perform scraping
-        output_folder = os.path.join('output', generate_unique_folder_name(st.session_state['urls'][0]))
-        os.makedirs(output_folder, exist_ok=True)
+def generate_system_message(listing_model: BaseModel) -> str:
+    """
+    Dynamically generate a system message based on the fields in the provided listing model.
+    """
+    # Use the model_json_schema() method to introspect the Pydantic model
+    schema_info = listing_model.model_json_schema()
 
-        total_input_tokens = 0
-        total_output_tokens = 0
-        total_cost = 0
-        all_data = []
-        all_raw_data = []
-        pagination_info = None
+    # Extract field descriptions from the schema
+    field_descriptions = []
+    for field_name, field_info in schema_info["properties"].items():
+        # Get the field type from the schema info
+        field_type = field_info["type"]
+        field_descriptions.append(f'"{field_name}": "{field_type}"')
 
-        for i, url in enumerate(st.session_state['urls'], start=1):
-            st.write(f"Processing URL {i}: {url}")  # Debug statement
-            try:
-                # Fetch HTML
-                raw_html = fetch_html_api(url)
-                markdown = html_to_markdown_with_readability(raw_html)
-                all_raw_data.append(markdown)
+    # Create the JSON schema structure for the listings
+    schema_structure = ",\n".join(field_descriptions)
 
-                # Detect pagination if enabled and only for the first URL
-                if st.session_state['use_pagination'] and i == 1:
-                    pagination_data, token_counts, pagination_price = detect_pagination_elements(
-                        url, st.session_state['pagination_details'], st.session_state['model_selection'], markdown
-                    )
-                    # Check if pagination_data is a dict or a model with 'page_urls' attribute
-                    if isinstance(pagination_data, dict):
-                        page_urls = pagination_data.get("page_urls", [])
-                    else:
-                        page_urls = pagination_data.page_urls
+    # Generate the system message dynamically
+    system_message = f"""
+    You are an intelligent text extraction and conversion assistant. Your task is to extract structured information
+                        from the given text and convert it into a pure JSON format. The JSON should contain only the structured data extracted from the text,
+                        with no additional commentary, explanations, or extraneous information.
+                        You could encounter cases where you can't find the data of the fields you have to extract or the data will be in a foreign language.
+                        Please process the following text and provide the output in pure JSON format with no words before or after the JSON:
+    Please ensure the output strictly follows this schema:
 
-                    pagination_info = {
-                        "page_urls": page_urls,
-                        "token_counts": token_counts,
-                        "price": pagination_price
-                    }
-                # Scrape data if fields are specified
-                if show_tags:
-                    # Create dynamic models
-                    DynamicListingModel = create_dynamic_listing_model(st.session_state['fields'])
-                    DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
-                    # Format data
-                    formatted_data, token_counts = format_data(
-                        markdown, DynamicListingsContainer, DynamicListingModel, st.session_state['model_selection']
-                    )
-                    input_tokens, output_tokens, cost = calculate_price(token_counts, st.session_state['model_selection'])
-                    total_input_tokens += input_tokens
-                    total_output_tokens += output_tokens
-                    total_cost += cost
+    {{
+        "listings": [
+            {{
+                {schema_structure}
+            }}
+        ]
+    }} """
 
-                    # Add source URL to the results
-                    for listing in formatted_data.listings:
-                        listing_dict = listing.model_dump()  # Convert to dictionary
-                        listing_dict['source'] = url  # Add source URL
-                        updated_listing = DynamicListingModel(**listing_dict)  # Create updated listing
-                        formatted_data.listings[formatted_data.listings.index(listing)] = updated_listing
+    return system_message
 
-                    all_data.append(formatted_data)
+def format_data(data, DynamicListingsContainer, DynamicListingModel, selected_model):
+    token_counts = {}
 
-                # Update processed URLs count
-                st.session_state['processed_urls'] += 1
-
-                # Save data every 100 URLs
-                if st.session_state['processed_urls'] % 100 == 0:
-                    # Save all raw data to a single file
-                    raw_data_path = os.path.join(output_folder, f'raw_data_{st.session_state["processed_urls"]}.md')
-                    with open(raw_data_path, 'w', encoding='utf-8') as f:
-                        f.write("\n\n".join(all_raw_data))
-                    st.write(f"Raw data saved to {raw_data_path}")
-
-                    # Save all formatted data to a single file
-                    combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
-                    formatted_data_path = os.path.join(output_folder, f'sorted_data_{st.session_state["processed_urls"]}.csv')
-                    combined_df.to_csv(formatted_data_path, index=False)
-                    st.write(f"Sorted data saved to {formatted_data_path}")
-
-                    # Clear the lists
-                    all_raw_data = []
-                    all_data = []
-
-                # Display real-time results for every 25 websites
-                if st.session_state['processed_urls'] % 25 == 0:
-                    st.write(f"Processed {st.session_state['processed_urls']} websites.")
-                    st.write(f"Current URL: {url}")
-                    st.write(f"Current Markdown: {markdown}")
-                    st.write(f"Current Formatted Data: {formatted_data}")
-
-            except Exception as e:
-                st.error(f"Error processing URL {i}: {e}")
-                continue  # Continue processing the next URL
-
-        # Save any remaining data
-        if all_raw_data:
-            raw_data_path = os.path.join(output_folder, f'raw_data_{st.session_state["processed_urls"]}.md')
-            with open(raw_data_path, 'w', encoding='utf-8') as f:
-                f.write("\n\n".join(all_raw_data))
-            st.write(f"Raw data saved to {raw_data_path}")
-
-        if all_data:
-            combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
-            formatted_data_path = os.path.join(output_folder, f'sorted_data_{st.session_state["processed_urls"]}.csv')
-            combined_df.to_csv(formatted_data_path, index=False)
-            st.write(f"Sorted data saved to {formatted_data_path}")
-
-        # Save results
-        st.session_state['results'] = {
-            'data': all_data,
-            'input_tokens': total_input_tokens,
-            'output_tokens': total_output_tokens,
-            'total_cost': total_cost,
-            'output_folder': output_folder,
-            'pagination_info': pagination_info
+    if selected_model in ["gpt-4o-mini", "gpt-4o-2024-08-06"]:
+        # Use OpenAI API
+        client = OpenAI(api_key=get_api_key('OPENAI_API_KEY'))
+        completion = client.beta.chat.completions.parse(
+            model=selected_model,
+            messages=[
+                {"role": "system", "content": SYSTEM_MESSAGE},
+                {"role": "user", "content": USER_MESSAGE + data},
+            ],
+            response_format=DynamicListingsContainer
+        )
+        # Calculate tokens using tiktoken
+        encoder = tiktoken.encoding_for_model(selected_model)
+        input_token_count = len(encoder.encode(USER_MESSAGE + data))
+        output_token_count = len(encoder.encode(json.dumps(completion.choices[0].message.parsed.dict())))
+        token_counts = {
+            "input_tokens": input_token_count,
+            "output_tokens": output_token_count
         }
-        st.session_state['scraping_state'] = 'completed'
+        return completion.choices[0].message.parsed, token_counts
 
-# Display results
-if st.session_state['scraping_state'] == 'completed' and st.session_state['results']:
-    results = st.session_state['results']
-    all_data = results['data']
-    total_input_tokens = results['input_tokens']
-    total_output_tokens = results['output_tokens']
-    total_cost = results['total_cost']
-    output_folder = results['output_folder']
-    pagination_info = results['pagination_info']
+    elif selected_model == "gemini-1.5-flash":
+        # Use Google Gemini API
+        genai.configure(api_key=get_api_key("GOOGLE_API_KEY"))
+        model = genai.GenerativeModel('gemini-1.5-flash',
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "response_schema": DynamicListingsContainer
+                })
+        prompt = SYSTEM_MESSAGE + "\n" + USER_MESSAGE + data
+        # Count input tokens using Gemini's method
+        input_tokens = model.count_tokens(prompt)
+        completion = model.generate_content(prompt)
+        # Extract token counts from usage_metadata
+        usage_metadata = completion.usage_metadata
+        token_counts = {
+            "input_tokens": usage_metadata.prompt_token_count,
+            "output_tokens": usage_metadata.candidates_token_count
+        }
+        return completion.text, token_counts
 
-    # Display scraping details
-    if show_tags:
-        st.subheader("Scraping Results")
-        combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
-        st.dataframe(combined_df, use_container_width=True)
+    elif selected_model == "Llama3.1 8B":
+        # Dynamically generate the system message based on the schema
+        sys_message = generate_system_message(DynamicListingModel)
+        # Point to the local server
+        client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
-        # Display token usage and cost
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### Scraping Details")
-        st.sidebar.markdown("#### Token Usage")
-        st.sidebar.markdown(f"*Input Tokens:* {total_input_tokens}")
-        st.sidebar.markdown(f"*Output Tokens:* {total_output_tokens}")
-        st.sidebar.markdown(f"**Total Cost:** :green-background[**${total_cost:.4f}**]")
-
-        # Download options
-        st.subheader("Download Extracted Data")
-        col1, col2 = st.columns(2)
-        with col1:
-            json_data = json.dumps(all_data, default=lambda o: o.model_dump() if hasattr(o, 'model_dump') else str(o), indent=4)
-            st.download_button(
-                "Download JSON",
-                data=json_data,
-                file_name="scraped_data.json"
-            )
-        with col2:
-            combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
-            st.download_button(
-                "Download CSV",
-                data=combined_df.to_csv(index=False),
-                file_name="scraped_data.csv"
-            )
-
-        st.success(f"Scraping completed. Results saved in {output_folder}")
-
-    # Display pagination info
-    if pagination_info:
-        st.markdown("---")
-        st.subheader("Pagination Information")
-
-        # Display token usage and cost using metrics
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### Pagination Details")
-        st.sidebar.markdown(f"**Number of Page URLs:** {len(pagination_info['page_urls'])}")
-        st.sidebar.markdown("#### Pagination Token Usage")
-        st.sidebar.markdown(f"*Input Tokens:* {pagination_info['token_counts']['input_tokens']}")
-        st.sidebar.markdown(f"*Output Tokens:* {pagination_info['token_counts']['output_tokens']}")
-        st.sidebar.markdown(f"**Pagination Cost:** :blue-background[**${pagination_info['price']:.4f}**]")
-
-        # Display page URLs in a table
-        st.write("**Page URLs:**")
-        # Make URLs clickable
-        pagination_df = pd.DataFrame(pagination_info["page_urls"], columns=["Page URLs"])
-
-        st.dataframe(
-            pagination_df,
-            column_config={
-                "Page URLs": st.column_config.LinkColumn("Page URLs")
-            },use_container_width=True
+        completion = client.chat.completions.create(
+            model=LLAMA_MODEL_FULLNAME, #change this if needed (use a better model)
+            messages=[
+                {"role": "system", "content": sys_message},
+                {"role": "user", "content": USER_MESSAGE + data}
+            ],
+            temperature=0.7,
         )
 
-        # Download pagination URLs
-        st.subheader("Download Pagination URLs")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button("Download Pagination CSV",data=pagination_df.to_csv(index=False),file_name="pagination_urls.csv")
-        with col2:
-            st.download_button("Download Pagination JSON",data=json.dumps(pagination_info['page_urls'], indent=4),file_name="pagination_urls.json")
-    # Reset scraping state
-    if st.sidebar.button("Clear Results"):
-        st.session_state['scraping_state'] = 'idle'
-        st.session_state['results'] = None
+        # Extract the content from the response
+        response_content = completion.choices[0].message.content
+        # Convert the content from JSON string to a Python dictionary
+        parsed_response = json.loads(response_content)
 
-   # If both scraping and pagination were performed, show totals under the pagination table
-    if show_tags and pagination_info:
-        st.markdown("---")
-        total_input_tokens_combined = total_input_tokens + pagination_info['token_counts']['input_tokens']
-        total_output_tokens_combined = total_output_tokens + pagination_info['token_counts']['output_tokens']
-        total_combined_cost = total_cost + pagination_info['price']
-        st.markdown("### Total Counts and Cost (Including Pagination)")
-        st.markdown(f"**Total Input Tokens:** {total_input_tokens_combined}")
-        st.markdown(f"**Total Output Tokens:** {total_output_tokens_combined}")
-        st.markdown(f"**Total Combined Cost:** :rainbow-background[**${total_combined_cost:.4f}**]")
-# Helper function to generate unique folder names
+        # Extract token usage
+        token_counts = {
+            "input_tokens": completion.usage.prompt_tokens,
+            "output_tokens": completion.usage.completion_tokens
+        }
+
+        return parsed_response, token_counts
+    elif selected_model== "Groq Llama3.1 70b":
+        # Dynamically generate the system message based on the schema
+        sys_message = generate_system_message(DynamicListingModel)
+        # Point to the local server
+        client = Groq(api_key=get_api_key("GROQ_API_KEY"),)
+
+        completion = client.chat.completions.create(
+        messages=[
+            {"role": "system","content": sys_message},
+            {"role": "user","content": USER_MESSAGE + data}
+        ],
+        model=GROQ_LLAMA_MODEL_FULLNAME,
+    )
+
+        # Extract the content from the response
+        response_content = completion.choices[0].message.content
+
+        # Convert the content from JSON string to a Python dictionary
+        parsed_response = json.loads(response_content)
+
+        # completion.usage
+        token_counts = {
+            "input_tokens": completion.usage.prompt_tokens,
+            "output_tokens": completion.usage.completion_tokens
+        }
+
+        return parsed_response, token_counts
+    else:
+        raise ValueError(f"Unsupported model: {selected_model}")
+
+def save_formatted_data(formatted_data, output_folder: str, json_file_name: str, excel_file_name: str):
+    """Save formatted data as JSON and Excel in the specified output folder."""
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Parse the formatted data if it's a JSON string (from Gemini API)
+    if isinstance(formatted_data, str):
+        try:
+            formatted_data_dict = json.loads(formatted_data)
+        except json.JSONDecodeError:
+            raise ValueError("The provided formatted data is a string but not valid JSON.")
+    else:
+        # Handle data from OpenAI or other sources
+        formatted_data_dict = formatted_data.dict() if hasattr(formatted_data, 'dict') else formatted_data
+
+    # Save the formatted data as JSON
+    json_output_path = os.path.join(output_folder, json_file_name)
+    with open(json_output_path, 'w', encoding='utf-8') as f:
+        json.dump(formatted_data_dict, f, indent=4)
+    print(f"Formatted data saved to JSON at {json_output_path}")
+
+    # Prepare data for DataFrame
+    if isinstance(formatted_data_dict, dict):
+        # If the data is a dictionary containing lists, assume these lists are records
+        data_for_df = next(iter(formatted_data_dict.values())) if len(formatted_data_dict) == 1 else formatted_data_dict
+    elif isinstance(formatted_data_dict, list):
+        data_for_df = formatted_data_dict
+    else:
+        raise ValueError("Formatted data is neither a dictionary nor a list, cannot convert to DataFrame")
+
+    # Create DataFrame
+    try:
+        df = pd.DataFrame(data_for_df)
+        print("DataFrame created successfully.")
+
+        # Save the DataFrame to an Excel file
+        excel_output_path = os.path.join(output_folder, excel_file_name)
+        df.to_excel(excel_output_path, index=False)
+        print(f"Formatted data saved to Excel at {excel_output_path}")
+
+        return df
+    except Exception as e:
+        print(f"Error creating DataFrame or saving Excel: {str(e)}")
+        return None
+
+def calculate_price(token_counts, model):
+    input_token_count = token_counts.get("input_tokens", 0)
+    output_token_count = token_counts.get("output_tokens", 0)
+
+    # Calculate the costs
+    input_cost = input_token_count * PRICING[model]["input"]
+    output_cost = output_token_count * PRICING[model]["output"]
+    total_cost = input_cost + output_cost
+
+    return input_token_count, output_token_count, total_cost
+
 def generate_unique_folder_name(url):
     timestamp = datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
+    url_name = re.sub(r'\W+', '_', url.split('//')[1].split('/')[0])  # Extract domain name and replace non-alphanumeric characters
+    return f"{url_name}_{timestamp}"
 
-    # Parse the URL
-    parsed_url = urlparse(url)
+def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: str, file_number: int, markdown: str):
+    """Scrape a single URL and save the results."""
+    try:
+        # Save raw data in real-time
+        save_raw_data_real_time(markdown, output_folder, f'rawData_{file_number}.md')
 
-    # Extract the domain name
-    domain = parsed_url.netloc or parsed_url.path.split('/')[0]
+        # Create the dynamic listing model
+        DynamicListingModel = create_dynamic_listing_model(fields)
 
-    # Remove 'www.' if present
-    domain = re.sub(r'^www\.', '', domain)
+        # Create the container model that holds a list of the dynamic listing models
+        DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
 
-    # Remove any non-alphanumeric characters and replace with underscores
-    clean_domain = re.sub(r'\W+', '_', domain)
+        # Format data
+        formatted_data, token_counts = format_data(markdown, DynamicListingsContainer, DynamicListingModel, selected_model)
 
-    return f"{clean_domain}_{timestamp}"
+        # Add source URL to the results
+        for listing in formatted_data.listings:
+            listing.source = url  # Add source URL
+
+        # Save formatted data
+        save_formatted_data(formatted_data, output_folder, f'sorted_data_{file_number}.json', f'sorted_data_{file_number}.xlsx')
+
+        # Calculate and return token usage and cost
+        input_tokens, output_tokens, total_cost = calculate_price(token_counts, selected_model)
+        return input_tokens, output_tokens, total_cost, formatted_data
+
+    except Exception as e:
+        print(f"An error occurred while processing {url}: {e}")
