@@ -15,30 +15,10 @@ from scraper import (
     scrape_url,
     generate_unique_folder_name
 )
-from pagination_detector import detect_pagination_elements
-import re
-from urllib.parse import urlparse
-from assets import PRICING
-import os
-import concurrent.futures
+from requests import web_search
 
 # Initialize Streamlit app
-st.set_page_config(page_title="Mawsool AI", page_icon="🦑", layout="wide")
-st.title("Mawsool AI 🦑")
-
-# Add the logo
-st.markdown(
-    """
-    <style>
-    .logo {
-        width: 100px;
-        height: auto;
-    }
-    </style>
-    <img class="logo" src="https://github.com/adeyali1/testscr/blob/main/Mawsool%20Website%20Logo%20%20(2).png?raw=true" alt="Mawsool AI Logo">
-    """,
-    unsafe_allow_html=True
-)
+st.set_page_config(page_title="Mawsool AI", page_icon="🦑")
 
 # Initialize session state variables
 if 'scraping_state' not in st.session_state:
@@ -51,6 +31,20 @@ if 'urls' not in st.session_state:
     st.session_state['urls'] = []
 if 'processed_urls' not in st.session_state:
     st.session_state['processed_urls'] = 0
+if 'real_time_results' not in st.session_state:
+    st.session_state['real_time_results'] = []
+if 'fields' not in st.session_state:
+    st.session_state['fields'] = []
+if 'model_selection' not in st.session_state:
+    st.session_state['model_selection'] = None
+if 'use_pagination' not in st.session_state:
+    st.session_state['use_pagination'] = None
+if 'pagination_details' not in st.session_state:
+    st.session_state['pagination_details'] = ""
+if 'show_tags' not in st.session_state:
+    st.session_state['show_tags'] = None
+if 'fields' not in st.session_state:
+    st.session_state['fields'] = []
 
 # Sidebar components
 st.sidebar.title("Web Scraper Settings")
@@ -105,7 +99,8 @@ if st.sidebar.button("LAUNCH SCRAPER", type="primary"):
             df = pd.read_csv(uploaded_file)
             st.session_state['urls'] = df.iloc[:, 0].tolist()
         elif uploaded_file.name.endswith('.txt'):
-            st.session_state['urls'] = uploaded_file.getvalue().decode("utf-8").splitlines()
+            with open(uploaded_file, 'r') as f:
+                st.session_state['urls'] = f.read().splitlines()
 
         # Set up scraping parameters in session state
         st.session_state['fields'] = fields
@@ -129,10 +124,8 @@ if st.session_state['scraping_state'] == 'scraping':
         all_raw_data = []
         pagination_info = None
 
-        batch_size = 100  # Process URLs in batches of 100
-
-        def process_url(url, file_number):
-            nonlocal total_input_tokens, total_output_tokens, total_cost, all_data, all_raw_data
+        for i, url in enumerate(st.session_state['urls'], start=1):
+            st.write(f"Processing URL {i}: {url}")  # Debug statement
             try:
                 # Fetch HTML
                 raw_html = fetch_html_api(url)
@@ -140,7 +133,7 @@ if st.session_state['scraping_state'] == 'scraping':
                 all_raw_data.append(markdown)
 
                 # Detect pagination if enabled and only for the first URL
-                if st.session_state['use_pagination'] and file_number == 1:
+                if st.session_state['use_pagination'] and i == 1:
                     pagination_data, token_counts, pagination_price = detect_pagination_elements(
                         url, st.session_state['pagination_details'], st.session_state['model_selection'], markdown
                     )
@@ -178,67 +171,38 @@ if st.session_state['scraping_state'] == 'scraping':
 
                     all_data.append(formatted_data)
 
-                # Update processed URLs count
-                st.session_state['processed_urls'] += 1
+                    # Update processed URLs count
+                    st.session_state['processed_urls'] += 1
 
-                # Display real-time results for every 25 websites
-                if st.session_state['processed_urls'] % 25 == 0:
-                    st.write(f"Processed {st.session_state['processed_urls']} websites.")
-                    st.write(f"Current URL: {url}")
-                    st.write(f"Current Markdown: {markdown}")
-                    st.write(f"Current Formatted Data: {formatted_data}")
+                    # Display real-time results for every 25 websites
+                    if st.session_state['processed_urls'] % 25 == 0:
+                        st.write(f"Processed {st.session_state['processed_urls']} websites.")
+                        st.write(f"Current URL: {url}")
+                        st.write(f"Current Markdown: {markdown}")
+                        st.write(f"Current Formatted Data: {formatted_data}")
 
-            except Exception as e:
-                st.error(f"Error processing URL {file_number}: {e}")
+                # Save all raw data to a single file
+                raw_data_path = os.path.join(output_folder, 'all_raw_data.md')
+                with open(raw_data_path, 'w', encoding='utf-8') as f:
+                    f.write("\n\n".join(all_raw_data))
+                st.write(f"All raw data saved to {raw_data_path}")
 
-        # Process URLs in batches
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = []
-            for i, url in enumerate(st.session_state['urls'], start=1):
-                futures.append(executor.submit(process_url, url, i))
-                if i % batch_size == 0:
-                    concurrent.futures.wait(futures)
-                    # Save data every batch_size URLs
-                    raw_data_path = os.path.join(output_folder, f'raw_data_{st.session_state["processed_urls"]}.md')
-                    with open(raw_data_path, 'w', encoding='utf-8') as f:
-                        f.write("\n\n".join(all_raw_data))
-                    st.write(f"Raw data saved to {raw_data_path}")
+                # Save all formatted data to a single file
+                combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
+                formatted_data_path = os.path.join(output_folder, 'all_sorted_data.csv')
+                combined_df.to_csv(formatted_data_path, index=False)
+                st.write(f"All sorted data saved to {formatted_data_path}")
 
-                    combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
-                    formatted_data_path = os.path.join(output_folder, f'sorted_data_{st.session_state["processed_urls"]}.csv')
-                    combined_df.to_csv(formatted_data_path, index=False)
-                    st.write(f"Sorted data saved to {formatted_data_path}")
-
-                    # Clear the lists
-                    all_raw_data = []
-                    all_data = []
-                    futures = []
-
-            concurrent.futures.wait(futures)
-
-        # Save any remaining data
-        if all_raw_data:
-            raw_data_path = os.path.join(output_folder, f'raw_data_{st.session_state["processed_urls"]}.md')
-            with open(raw_data_path, 'w', encoding='utf-8') as f:
-                f.write("\n\n".join(all_raw_data))
-            st.write(f"Raw data saved to {raw_data_path}")
-
-        if all_data:
-            combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
-            formatted_data_path = os.path.join(output_folder, f'sorted_data_{st.session_state["processed_urls"]}.csv')
-            combined_df.to_csv(formatted_data_path, index=False)
-            st.write(f"Sorted data saved to {formatted_data_path}")
-
-        # Save results
-        st.session_state['results'] = {
-            'data': all_data,
-            'input_tokens': total_input_tokens,
-            'output_tokens': total_output_tokens,
-            'total_cost': total_cost,
-            'output_folder': output_folder,
-            'pagination_info': pagination_info
-        }
-        st.session_state['scraping_state'] = 'completed'
+                # Save results
+                st.session_state['results'] = {
+                    'data': all_data,
+                    'input_tokens': total_input_tokens,
+                    'output_tokens': total_output_tokens,
+                    'total_cost': total_cost,
+                    'output_folder': output_folder,
+                    'pagination_info': pagination_info
+                }
+                st.session_state['scraping_state'] = 'completed'
 
 # Display results
 if st.session_state['scraping_state'] == 'completed' and st.session_state['results']:
@@ -292,8 +256,6 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
         # Display token usage and cost using metrics
         st.sidebar.markdown("---")
         st.sidebar.markdown("### Pagination Details")
-        st.sidebar.markdown(f"**Number of Page URLs:** {len(pagination_info['page_urls'])}")
-        st.sidebar.markdown("#### Pagination Token Usage")
         st.sidebar.markdown(f"*Input Tokens:* {pagination_info['token_counts']['input_tokens']}")
         st.sidebar.markdown(f"*Output Tokens:* {pagination_info['token_counts']['output_tokens']}")
         st.sidebar.markdown(f"**Pagination Cost:** :blue-background[**${pagination_info['price']:.4f}**]")
@@ -307,16 +269,25 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
             pagination_df,
             column_config={
                 "Page URLs": st.column_config.LinkColumn("Page URLs")
-            },use_container_width=True
+            },
+            use_container_width=True
         )
 
         # Download pagination URLs
         st.subheader("Download Pagination URLs")
         col1, col2 = st.columns(2)
         with col1:
-            st.download_button("Download Pagination CSV",data=pagination_df.to_csv(index=False),file_name="pagination_urls.csv")
+            st.download_button(
+                "Download Pagination CSV",
+                data=pagination_df.to_csv(index=False),
+                file_name="pagination_urls.csv"
+            )
         with col2:
-            st.download_button("Download Pagination JSON",data=json.dumps(pagination_info['page_urls'], indent=4),file_name="pagination_urls.json")
+            st.download_button(
+                "Download Pagination JSON",
+                data=json.dumps(pagination_info['page_urls'], indent=4),
+                file_name="pagination_urls.json"
+            )
     # Reset scraping state
     if st.sidebar.button("Clear Results"):
         st.session_state['scraping_state'] = 'idle'
@@ -332,20 +303,3 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
         st.markdown(f"**Total Input Tokens:** {total_input_tokens_combined}")
         st.markdown(f"**Total Output Tokens:** {total_output_tokens_combined}")
         st.markdown(f"**Total Combined Cost:** :rainbow-background[**${total_combined_cost:.4f}**]")
-# Helper function to generate unique folder names
-def generate_unique_folder_name(url):
-    timestamp = datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
-
-    # Parse the URL
-    parsed_url = urlparse(url)
-
-    # Extract the domain name
-    domain = parsed_url.netloc or parsed_url.path.split('/')[0]
-
-    # Remove 'www.' if present
-    domain = re.sub(r'^www\.', '', domain)
-
-    # Remove any non-alphanumeric characters and replace with underscores
-    clean_domain = re.sub(r'\W+', '_', domain)
-
-    return f"{clean_domain}_{timestamp}"
