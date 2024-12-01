@@ -296,3 +296,29 @@ def generate_unique_folder_name(url):
     clean_domain = re.sub(r'\W+', '_', domain)
 
     return f"{clean_domain}_{timestamp}"
+
+def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: str, file_number: int, markdown: str):
+    """Scrape a single URL and save the results."""
+    try:
+        # Save raw data
+        raw_data_path = save_raw_data(markdown, output_folder, f'rawData_{file_number}.md')
+
+        # Create the dynamic listing model
+        DynamicListingModel = create_dynamic_listing_model(fields)
+
+        # Create the container model that holds a list of the dynamic listing models
+        DynamicListingsContainer = create_listings_container_model(DynamicListingModel)
+
+        # Format data
+        formatted_data, token_counts = format_data(markdown, DynamicListingsContainer, DynamicListingModel, selected_model)
+
+        # Save formatted data
+        save_formatted_data(formatted_data, output_folder, f'sorted_data_{file_number}.json', f'sorted_data_{file_number}.xlsx')
+
+        # Calculate and return token usage and cost
+        input_tokens, output_tokens, total_cost = calculate_price(token_counts, selected_model)
+        return input_tokens, output_tokens, total_cost, formatted_data
+
+    except Exception as e:
+        print(f"An error occurred while processing {url}: {e}")
+        return 0, 0, 0, None
