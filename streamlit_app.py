@@ -20,6 +20,7 @@ import re
 from urllib.parse import urlparse
 from assets import PRICING
 import os
+import concurrent.futures
 
 # Initialize Streamlit app
 st.set_page_config(page_title="Mawsool AI", page_icon="🦑", layout="wide")
@@ -128,8 +129,10 @@ if st.session_state['scraping_state'] == 'scraping':
         all_raw_data = []
         pagination_info = None
 
-        for i, url in enumerate(st.session_state['urls'], start=1):
-            st.write(f"Processing URL {i}: {url}")  # Debug statement
+        batch_size = 100  # Process URLs in batches of 100
+
+        def process_url(url, file_number):
+            nonlocal total_input_tokens, total_output_tokens, total_cost, all_data, all_raw_data
             try:
                 # Fetch HTML
                 raw_html = fetch_html_api(url)
@@ -137,7 +140,7 @@ if st.session_state['scraping_state'] == 'scraping':
                 all_raw_data.append(markdown)
 
                 # Detect pagination if enabled and only for the first URL
-                if st.session_state['use_pagination'] and i == 1:
+                if st.session_state['use_pagination'] and file_number == 1:
                     pagination_data, token_counts, pagination_price = detect_pagination_elements(
                         url, st.session_state['pagination_details'], st.session_state['model_selection'], markdown
                     )
@@ -186,20 +189,45 @@ if st.session_state['scraping_state'] == 'scraping':
                     st.write(f"Current Formatted Data: {formatted_data}")
 
             except Exception as e:
-                st.error(f"Error processing URL {i}: {e}")
-                continue  # Continue processing the next URL
+                st.error(f"Error processing URL {file_number}: {e}")
 
-        # Save all raw data to a single file
-        raw_data_path = os.path.join(output_folder, 'all_raw_data.md')
-        with open(raw_data_path, 'w', encoding='utf-8') as f:
-            f.write("\n\n".join(all_raw_data))
-        st.write(f"All raw data saved to {raw_data_path}")
+        # Process URLs in batches
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = []
+            for i, url in enumerate(st.session_state['urls'], start=1):
+                futures.append(executor.submit(process_url, url, i))
+                if i % batch_size == 0:
+                    concurrent.futures.wait(futures)
+                    # Save data every batch_size URLs
+                    raw_data_path = os.path.join(output_folder, f'raw_data_{st.session_state["processed_urls"]}.md')
+                    with open(raw_data_path, 'w', encoding='utf-8') as f:
+                        f.write("\n\n".join(all_raw_data))
+                    st.write(f"Raw data saved to {raw_data_path}")
 
-        # Save all formatted data to a single file
-        combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
-        formatted_data_path = os.path.join(output_folder, 'all_sorted_data.csv')
-        combined_df.to_csv(formatted_data_path, index=False)
-        st.write(f"All sorted data saved to {formatted_data_path}")
+                    combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
+                    formatted_data_path = os.path.join(output_folder, f'sorted_data_{st.session_state["processed_urls"]}.csv')
+                    combined_df.to_csv(formatted_data_path, index=False)
+                    st.write(f"Sorted data saved to {formatted_data_path}")
+
+                    # Clear the lists
+                    all_raw_data = []
+                    all_data = []
+                    futures = []
+
+            concurrent.futures.wait(futures)
+
+        # Save any remaining data
+        if all_raw_data:
+            raw_data_path = os.path.join(output_folder, f'raw_data_{st.session_state["processed_urls"]}.md')
+            with open(raw_data_path, 'w', encoding='utf-8') as f:
+                f.write("\n\n".join(all_raw_data))
+            st.write(f"Raw data saved to {raw_data_path}")
+
+        if all_data:
+            combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
+            formatted_data_path = os.path.join(output_folder, f'sorted_data_{st.session_state["processed_urls"]}.csv')
+            combined_df.to_csv(formatted_data_path, index=False)
+            st.write(f"Sorted data saved to {formatted_data_path}")
 
         # Save results
         st.session_state['results'] = {
@@ -307,5 +335,17 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
 # Helper function to generate unique folder names
 def generate_unique_folder_name(url):
     timestamp = datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
-    url_name = re.sub(r'\W+', '_', url.split('//')[1].split('/')[0])  # Extract domain name and replace non-alphanumeric characters
-    return f"{url_name}_{timestamp}"
+
+    # Parse the URL
+    parsed_url = urlparse(url)
+
+    # Extract the domain name
+    domain = parsed_url.netloc or parsed_url.path.split('/')[0]
+
+    # Remove 'www.' if present
+    domain = re.sub(r'^www\.', '', domain)
+
+    # Remove any non-alphanumeric characters and replace with underscores
+    clean_domain = re.sub(r'\W+', '_', domain)
+
+    return f"{clean_domain}_{timestamp}"
