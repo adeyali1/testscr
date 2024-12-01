@@ -322,3 +322,4 @@ def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: 
 
     except Exception as e:
         print(f"An error occurred while processing {url}: {e}")
+        return 0, 0, 0, None
