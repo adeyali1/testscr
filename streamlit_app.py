@@ -307,17 +307,5 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
 # Helper function to generate unique folder names
 def generate_unique_folder_name(url):
     timestamp = datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
-
-    # Parse the URL
-    parsed_url = urlparse(url)
-
-    # Extract the domain name
-    domain = parsed_url.netloc or parsed_url.path.split('/')[0]
-
-    # Remove 'www.' if present
-    domain = re.sub(r'^www\.', '', domain)
-
-    # Remove any non-alphanumeric characters and replace with underscores
-    clean_domain = re.sub(r'\W+', '_', domain)
-
-    return f"{clean_domain}_{timestamp}"
+    url_name = re.sub(r'\W+', '_', url.split('//')[1].split('/')[0])  # Extract domain name and replace non-alphanumeric characters
+    return f"{url_name}_{timestamp}"
