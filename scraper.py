@@ -1,28 +1,16 @@
-import os
-import random
-import time
-import re
-import json
-from datetime import datetime
-from typing import List, Dict, Type
-
-import pandas as pd
-from bs4 import BeautifulSoup
-from pydantic import BaseModel, Field, create_model
-import html2text
-import tiktoken
-import streamlit as st
-
-from dotenv import load_dotenv
-import http.client
-
-from openai import OpenAI
-import google.generativeai as genai
-from groq import Groq
-
-from api_management import get_api_key
-from assets import USER_AGENTS, PRICING, HEADLESS_OPTIONS, SYSTEM_MESSAGE, USER_MESSAGE, LLAMA_MODEL_FULLNAME, GROQ_LLAMA_MODEL_FULLNAME, HEADLESS_OPTIONS_DOCKER
-load_dotenv()
+from scraper import (
+    fetch_html_api,
+    save_raw_data,
+    format_data,
+    save_formatted_data,
+    calculate_price,
+    html_to_markdown_with_readability,
+    create_dynamic_listing_model,
+    create_listings_container_model,
+    scrape_url,
+    generate_unique_folder_name
+)
+from requests import web_search
 
 def fetch_html_api(url):
     conn = http.client.HTTPSConnection("fast-ninja-scraper.p.rapidapi.com")
@@ -35,94 +23,14 @@ def fetch_html_api(url):
     data = res.read()
     return data.decode("utf-8")
 
-def clean_html(html_content):
-    soup = BeautifulSoup(html_content, 'html.parser')
-
-    # Remove headers and footers based on common HTML tags or classes
-    for element in soup.find_all(['header', 'footer']):
-        element.decompose()  # Remove these tags and their content
-
-    return str(soup)
-
-def html_to_markdown_with_readability(html_content):
-    cleaned_html = clean_html(html_content)
-
-    # Convert to markdown
-    markdown_converter = html2text.HTML2Text()
-    markdown_converter.ignore_links = False
-    markdown_content = markdown_converter.handle(cleaned_html)
-
-    return markdown_content
-
 def save_raw_data(raw_data: str, output_folder: str, file_name: str):
-    """Save raw markdown data to the specified output folder."""
+    """Save raw markdown data to the specified output folder and file name."""
     os.makedirs(output_folder, exist_ok=True)
     raw_output_path = os.path.join(output_folder, file_name)
     with open(raw_output_path, 'w', encoding='utf-8') as f:
         f.write(raw_data)
     print(f"Raw data saved to {raw_output_path}")
     return raw_output_path
-
-def create_dynamic_listing_model(field_names: List[str]) -> Type[BaseModel]:
-    """
-    Dynamically creates a Pydantic model based on provided fields.
-    field_name is a list of names of the fields to extract from the markdown.
-    """
-    # Create field definitions using aliases for Field parameters
-    field_definitions = {field: (str, ...) for field in field_names}
-    field_definitions['source'] = (str, ...)  # Add source field
-    # Dynamically create the model with all fields
-    return create_model('DynamicListingModel', **field_definitions)
-
-def create_listings_container_model(listing_model: Type[BaseModel]) -> Type[BaseModel]:
-    """
-    Create a container model that holds a list of the given listing model.
-    """
-    return create_model('DynamicListingsContainer', listings=(List[listing_model], ...))
-
-def trim_to_token_limit(text, model, max_tokens=120000):
-    encoder = tiktoken.encoding_for_model(model)
-    tokens = encoder.encode(text)
-    if len(tokens) > max_tokens:
-        trimmed_text = encoder.decode(tokens[:max_tokens])
-        return trimmed_text
-    return text
-
-def generate_system_message(listing_model: BaseModel) -> str:
-    """
-    Dynamically generate a system message based on the fields in the provided listing model.
-    """
-    # Use the model_json_schema() method to introspect the Pydantic model
-    schema_info = listing_model.model_json_schema()
-
-    # Extract field descriptions from the schema
-    field_descriptions = []
-    for field_name, field_info in schema_info["properties"].items():
-        # Get the field type from the schema info
-        field_type = field_info["type"]
-        field_descriptions.append(f'"{field_name}": "{field_type}"')
-
-    # Create the JSON schema structure for the listings
-    schema_structure = ",\n".join(field_descriptions)
-
-    # Generate the system message dynamically
-    system_message = f"""
-    You are an intelligent text extraction and conversion assistant. Your task is to extract structured information
-                        from the given text and convert it into a pure JSON format. The JSON should contain only the structured data extracted from the text,
-                        with no additional commentary, explanations, or extraneous information.
-                        You could encounter cases where you can't find the data of the fields you have to extract or the data will be in a foreign language.
-                        Please process the following text and provide the output in pure JSON format with no words before or after the JSON:
-    Please ensure the output strictly follows this schema:
-
-    {{
-        "listings": [
-            {{
-                {schema_structure}
-            }}
-        ]
-    }} """
-
-    return system_message
 
 def format_data(data, DynamicListingsContainer, DynamicListingModel, selected_model):
     token_counts = {}
@@ -140,13 +48,11 @@ def format_data(data, DynamicListingsContainer, DynamicListingModel, selected_mo
         )
         # Calculate tokens using tiktoken
         encoder = tiktoken.encoding_for_model(selected_model)
-        input_token_count = len(encoder.encode(USER_MESSAGE + data))
-        output_token_count = len(encoder.encode(json.dumps(completion.choices[0].message.parsed.dict())))
-        token_counts = {
-            "input_tokens": input_token_count,
-            "output_tokens": output_token_count
-        }
-        return completion.choices[0].message.parsed, token_counts
+        tokens = encoder.encode(USER_MESSAGE + data)
+        if len(tokens) > 120000:
+            trimmed_text = encoder.decode(tokens[:120000])
+            return trimmed_text
+        return text
 
     elif selected_model == "gemini-1.5-flash":
         # Use Google Gemini API
@@ -195,6 +101,7 @@ def format_data(data, DynamicListingsContainer, DynamicListingModel, selected_mo
         }
 
         return parsed_response, token_counts
+
     elif selected_model== "Groq Llama3.1 70b":
         # Dynamically generate the system message based on the schema
         sys_message = generate_system_message(DynamicListingModel)
@@ -289,7 +196,7 @@ def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: 
     """Scrape a single URL and save the results."""
     try:
         # Save raw data
-        save_raw_data(markdown, output_folder, f'rawData_{file_number}.md')
+        raw_data_path = save_raw_data(markdown, output_folder, f'rawData_{file_number}.md')
 
         # Create the dynamic listing model
         DynamicListingModel = create_dynamic_listing_model(fields)
