@@ -15,7 +15,8 @@ from scraper import (
     scrape_url,
     generate_unique_folder_name,
     save_real_time_results,
-    process_batch
+    process_batch,
+    append_to_csv
 )
 from pagination_detector import detect_pagination_elements
 import re
@@ -136,10 +137,10 @@ if st.session_state['scraping_state'] == 'scraping':
             f.write("\n\n".join(all_raw_data))
         st.write(f"All raw data saved to {raw_data_path}")
 
-        # Save all formatted data to a single file
+        # Save all formatted data to a single file incrementally
         combined_df = pd.DataFrame([item.model_dump() for sublist in all_data for item in sublist.listings])
         formatted_data_path = os.path.join(output_folder, 'all_sorted_data.csv')
-        combined_df.to_csv(formatted_data_path, index=False)
+        append_to_csv(combined_df.to_dict(orient='records'), output_folder, 'all_sorted_data.csv')
         st.write(f"All sorted data saved to {formatted_data_path}")
 
         # Save results
