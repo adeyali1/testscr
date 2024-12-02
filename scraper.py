@@ -1,5 +1,3 @@
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import os
 import random
 import time
@@ -26,15 +24,6 @@ from assets import USER_AGENTS, PRICING, HEADLESS_OPTIONS, SYSTEM_MESSAGE, USER_
 
 # Load environment variables
 load_dotenv()
-
-# Set up Google Sheets Integration
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/spreadsheets",
-         "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
-
-creds = ServiceAccountCredentials.from_json_keyfile_name(
-    "client_secret_1016778401112-1q5tdlkuvcl0rkbbjmptbirmk0vn8drv.apps.googleusercontent.com.json", scope)
-client = gspread.authorize(creds)
-sheet = client.open("ScrapedData").sheet1
 
 def fetch_html_api(url):
     conn = http.client.HTTPSConnection("fast-ninja-scraper.p.rapidapi.com")
@@ -87,8 +76,8 @@ def calculate_price(token_counts, model):
     total_cost = input_cost + output_cost
     return input_token_count, output_token_count, total_cost
 
-def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: str, file_number: int, markdown: str, sheet):
-    """Scrape a single URL and save the results incrementally."""
+def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: str, file_number: int, markdown: str, csv_file):
+    """Scrape a single URL and save the results incrementally to a CSV file."""
     try:
         # Save raw data
         save_raw_data(markdown, output_folder, f'rawData_{file_number}.md')
@@ -106,16 +95,16 @@ def scrape_url(url: str, fields: List[str], selected_model: str, output_folder: 
         for listing in formatted_data.listings:
             listing.source = url
 
-        # Save formatted data locally
-        save_formatted_data(formatted_data, output_folder, f'sorted_data_{file_number}.json', f'sorted_data_{file_number}.xlsx')
-
-        # Save to Google Sheets in real-time
+        # Prepare data for saving to CSV
         formatted_data_dict = formatted_data.dict() if hasattr(formatted_data, 'dict') else formatted_data
         data_list = [[url] + [listing.get(field, "") for field in fields] for listing in formatted_data_dict.get("listings", [])]
 
-        # Append data to Google Sheet
-        for row in data_list:
-            sheet.append_row(row)
+        # Append data to CSV file
+        df = pd.DataFrame(data_list, columns=["URL"] + fields)
+        if not os.path.exists(csv_file):
+            df.to_csv(csv_file, index=False)
+        else:
+            df.to_csv(csv_file, mode='a', header=False, index=False)
 
         # Calculate and return token usage and cost
         input_tokens, output_tokens, total_cost = calculate_price(token_counts, selected_model)
