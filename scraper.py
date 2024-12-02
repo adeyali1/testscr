@@ -23,6 +23,12 @@ from groq import Groq
 from api_management import get_api_key
 from assets import USER_AGENTS, PRICING, HEADLESS_OPTIONS, SYSTEM_MESSAGE, USER_MESSAGE, LLAMA_MODEL_FULLNAME, GROQ_LLAMA_MODEL_FULLNAME, HEADLESS_OPTIONS_DOCKER
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
+import warnings
+
+# Suppress specific warnings
+logging.getLogger("azureml").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message="missing ScriptRunContext")
 
 load_dotenv()
 
@@ -363,3 +369,20 @@ def process_batch(urls, fields, selected_model, output_folder, batch_size=100):
             total_cost += cost
 
     return all_data, all_raw_data, total_input_tokens, total_output_tokens, total_cost
+
+def append_to_csv(data, output_folder: str, file_name: str):
+    """Append data to a CSV file."""
+    os.makedirs(output_folder, exist_ok=True)
+    csv_output_path = os.path.join(output_folder, file_name)
+
+    # Convert data to DataFrame
+    df = pd.DataFrame(data)
+
+    # Append to CSV file
+    if os.path.exists(csv_output_path):
+        df.to_csv(csv_output_path, mode='a', header=False, index=False)
+    else:
+        df.to_csv(csv_output_path, index=False)
+
+    print(f"Data appended to CSV at {csv_output_path}")
+    return csv_output_path
