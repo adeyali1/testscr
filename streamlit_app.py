@@ -19,7 +19,7 @@ st.title("Mawsool AI 🦑")
 # Sidebar components
 st.sidebar.title("Web Scraper Settings")
 
-# API Keys
+# API Keys Section - Add OpenAI API Key
 with st.sidebar.expander("API Keys", expanded=True):
     openai_api_key = st.text_input("OpenAI API Key", type="password")
     st.session_state['openai_api_key'] = openai_api_key
@@ -27,12 +27,27 @@ with st.sidebar.expander("API Keys", expanded=True):
 # File uploader for bulk URLs
 uploaded_file = st.sidebar.file_uploader("Upload CSV or TXT file with URLs", type=["csv", "txt"])
 
+# Fields to extract
+show_tags = st.sidebar.checkbox("Enable Scraping")
+fields = []
+if show_tags:
+    fields = st_tags_sidebar(
+        label='Enter Fields to Extract:',
+        text='Press enter to add a field',
+        value=[],
+        suggestions=[],
+        maxtags=-1,
+        key='fields_input'
+    )
+
 # Main action button
 if st.sidebar.button("LAUNCH SCRAPER", type="primary"):
     if uploaded_file is None:
         st.error("Please upload a file containing URLs.")
     elif 'openai_api_key' not in st.session_state or not st.session_state['openai_api_key']:
         st.error("Please provide your OpenAI API Key.")
+    elif show_tags and len(fields) == 0:
+        st.error("Please enter at least one field to extract.")
     else:
         # Read URLs from the uploaded file
         if uploaded_file.name.endswith('.csv'):
@@ -42,6 +57,7 @@ if st.sidebar.button("LAUNCH SCRAPER", type="primary"):
             st.session_state['urls'] = uploaded_file.getvalue().decode("utf-8").splitlines()
 
         # Set up scraping parameters in session state
+        st.session_state['fields'] = fields
         st.session_state['scraping_state'] = 'scraping'
         st.session_state['processed_urls'] = 0
 
@@ -56,7 +72,7 @@ if st.session_state.get('scraping_state') == 'scraping':
             st.write(f"Processing URL {i}: {url}")
             try:
                 # Scrape data and save it to CSV
-                success = scrape_url(url, [], output_folder, i, csv_file)
+                success = scrape_url(url, st.session_state['fields'], output_folder, i, csv_file)
 
                 if success:
                     st.session_state['processed_urls'] += 1
@@ -70,3 +86,4 @@ if st.session_state.get('scraping_state') == 'scraping':
 
         st.success(f"Scraping completed. Data saved to CSV at {csv_file}.")
         st.session_state['scraping_state'] = 'completed'
+
