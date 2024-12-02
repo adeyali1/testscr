@@ -1,7 +1,6 @@
 import streamlit as st
 from streamlit_tags import st_tags_sidebar
 import pandas as pd
-import json
 import os
 from scraper import (
     fetch_html_api,
@@ -11,20 +10,9 @@ from scraper import (
     create_listings_container_model,
     scrape_url
 )
-
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from urllib.parse import urlparse
 import re
-
-# Set up Google Sheets Integration
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/spreadsheets",
-         "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
-
-creds = ServiceAccountCredentials.from_json_keyfile_name("client_secret_1016778401112-1q5tdlkuvcl0rkbbjmptbirmk0vn8drv.apps.googleusercontent.com.json", scope)
-client = gspread.authorize(creds)
-sheet = client.open("ScrapedData").sheet1
 
 # Initialize Streamlit app
 st.set_page_config(page_title="Mawsool AI", page_icon="🦑", layout="wide")
@@ -73,11 +61,11 @@ if st.session_state.get('scraping_state') == 'scraping':
     with st.spinner('Scraping in progress...'):
         output_folder = 'output'
         os.makedirs(output_folder, exist_ok=True)
+        csv_file = os.path.join(output_folder, 'scraped_data.csv')
 
         total_input_tokens = 0
         total_output_tokens = 0
         total_cost = 0
-        all_data = []
 
         for i, url in enumerate(st.session_state['urls'], start=1):
             st.write(f"Processing URL {i}: {url}")
@@ -89,7 +77,7 @@ if st.session_state.get('scraping_state') == 'scraping':
                 # Scrape data if fields are specified
                 if show_tags:
                     input_tokens, output_tokens, cost, formatted_data = scrape_url(
-                        url, st.session_state['fields'], st.session_state['model_selection'], output_folder, i, markdown, sheet
+                        url, st.session_state['fields'], st.session_state['model_selection'], output_folder, i, markdown, csv_file
                     )
                     total_input_tokens += input_tokens
                     total_output_tokens += output_tokens
@@ -105,5 +93,5 @@ if st.session_state.get('scraping_state') == 'scraping':
                 st.error(f"Error processing URL {i}: {e}")
                 continue
 
-        st.success(f"Scraping completed. Results saved in Google Sheets.")
+        st.success(f"Scraping completed. Data saved to CSV at {csv_file}.")
         st.session_state['scraping_state'] = 'completed'
