@@ -6,7 +6,8 @@ from scraper import (
     fetch_html_api,
     save_raw_data,
     scrape_url,
-    html_to_markdown_with_readability
+    html_to_markdown_with_readability,
+    generate_unique_folder_name
 )
 from datetime import datetime
 from urllib.parse import urlparse
@@ -66,13 +67,13 @@ if st.session_state.get('scraping_state') == 'scraping':
     with st.spinner('Scraping in progress...'):
         output_folder = 'output'
         os.makedirs(output_folder, exist_ok=True)
-        csv_file = os.path.join(output_folder, 'scraped_data.csv')
+        csv_file_path = os.path.join(output_folder, 'scraped_data.csv')
 
         for i, url in enumerate(st.session_state['urls'], start=1):
             st.write(f"Processing URL {i}: {url}")
             try:
                 # Scrape data and save it to CSV
-                success = scrape_url(url, st.session_state['fields'], output_folder, i, csv_file)
+                success = scrape_url(url, st.session_state['fields'], "", output_folder, i, csv_file_path)
 
                 if success:
                     st.session_state['processed_urls'] += 1
@@ -80,10 +81,13 @@ if st.session_state.get('scraping_state') == 'scraping':
                 if st.session_state['processed_urls'] % 25 == 0:
                     st.write(f"Processed {st.session_state['processed_urls']} websites.")
 
+                # Periodically update to avoid overwhelming system memory for large datasets
+                if i % 100 == 0:
+                    st.experimental_rerun()
+
             except Exception as e:
                 st.error(f"Error processing URL {i}: {e}")
                 continue
 
-        st.success(f"Scraping completed. Data saved to CSV at {csv_file}.")
+        st.success(f"Scraping completed. Data saved to CSV at {csv_file_path}.")
         st.session_state['scraping_state'] = 'completed'
-
