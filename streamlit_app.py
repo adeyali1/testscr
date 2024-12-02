@@ -21,6 +21,10 @@ st.title("Mawsool AI 🦑")
 # Sidebar components
 st.sidebar.title("Web Scraper Settings")
 
+# API Keys
+with st.sidebar.expander("API Keys", expanded=True):
+    st.session_state['openai_api_key'] = st.text_input("OpenAI API Key", type="password")
+
 # File uploader for bulk URLs
 uploaded_file = st.sidebar.file_uploader("Upload CSV or TXT file with URLs", type=["csv", "txt"])
 
@@ -39,7 +43,9 @@ if show_tags:
 
 # Main action button
 if st.sidebar.button("LAUNCH SCRAPER", type="primary"):
-    if uploaded_file is None:
+    if 'openai_api_key' not in st.session_state or not st.session_state['openai_api_key']:
+        st.error("Please provide your OpenAI API Key.")
+    elif uploaded_file is None:
         st.error("Please upload a file containing URLs.")
     elif show_tags and len(fields) == 0:
         st.error("Please enter at least one field to extract.")
