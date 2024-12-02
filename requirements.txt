@@ -14,3 +14,12 @@ openpyxl
 groq
 google-generativeai
 webdriver-manager
+gspread
+oauth2client
+streamlit
+pandas
+html2text
+beautifulsoup4
+tiktoken
+openai
+google-generativeai
