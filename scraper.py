@@ -35,7 +35,7 @@ load_dotenv()
 def fetch_html_api(url):
     conn = http.client.HTTPSConnection("fast-ninja-scraper.p.rapidapi.com")
     headers = {
-        'x-rapidapi-key': "779950d602mshdb324e7fb7fc384p10ad06jsnc96469ca8d95",
+        'x-rapidapi-key': "779950d602mshdb324e7fb7fc384p10ad06jsnc96469ca",
         'x-rapidapi-host': "fast-ninja-scraper.p.rapidapi.com"
     }
     conn.request("GET", f"/scrape?url={url}", headers=headers)
